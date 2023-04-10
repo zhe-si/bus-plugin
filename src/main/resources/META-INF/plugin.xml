@@ -1,18 +1,21 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.github.zhesi.busplugin</id>
-    <name>bus-plugin Template</name>
+    <id>com.zhesi.busplugin</id>
+    <name>Bus Tools</name>
     <vendor>zhe-si</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+    <depends>org.jetbrains.kotlin</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.zhesi.busplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.zhesi.busplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <codeInsight.lineMarkerProvider language="JAVA" implementationClass="com.zhesi.busplugin.BusLineMarkerProvider"/>
     </extensions>
 
     <applicationListeners>
-        <listener class="com.github.zhesi.busplugin.listeners.MyFrameStateListener" topic="com.intellij.ide.FrameStateListener"/>
+        <listener class="com.zhesi.busplugin.listeners.MyFrameStateListener" topic="com.intellij.ide.FrameStateListener"/>
     </applicationListeners>
 </idea-plugin>

@@ -1,4 +1,4 @@
-package com.github.zhesi.busplugin.listeners
+package com.zhesi.busplugin.listeners
 
 import com.intellij.ide.FrameStateListener
 import com.intellij.openapi.diagnostic.thisLogger

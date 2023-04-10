@@ -1,4 +1,4 @@
-package com.github.zhesi.busplugin
+package com.zhesi.busplugin
 
 import com.intellij.DynamicBundle
 import org.jetbrains.annotations.NonNls
