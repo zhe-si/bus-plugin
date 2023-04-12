@@ -3,23 +3,36 @@ package com.zhesi.busplugin
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerInfo
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerProvider
 import com.intellij.codeInsight.navigation.NavigationGutterIconBuilder
+import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.ide.util.DefaultPsiElementCellRenderer
 import com.intellij.json.JsonFileType
 import com.intellij.json.psi.JsonProperty
 import com.intellij.openapi.editor.markup.GutterIconRenderer
-import com.intellij.psi.PsiClass
-import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiManager
+import com.intellij.openapi.project.Project
+import com.intellij.psi.*
+import com.intellij.psi.impl.source.PsiClassReferenceType
 import com.intellij.psi.search.FileTypeIndex
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.PsiSuperMethodUtil
 import com.intellij.psi.util.PsiTreeUtil
 import com.zhesi.busplugin.common.Icons
+import org.jetbrains.kotlin.asJava.elements.KtLightField
+import org.jetbrains.kotlin.asJava.getRepresentativeLightMethod
+import org.jetbrains.kotlin.idea.stubindex.KotlinFullClassNameIndex
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.psiUtil.findFunctionByName
 import javax.swing.Icon
 import kotlin.streams.toList
 
 /**
  * **BusLineMarkerProvider**
+ *
+ * 组件间交互逻辑可读性：生成某个事件的发布订阅依赖关系图
+ * 1. 根据订阅查看对应事件发布者
+ * 2. 根据发布者查看所有订阅
+ * 3. 从observe查看所有事件
  *
  * @author lq
  * @version 1.0
@@ -28,44 +41,120 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     override fun collectNavigationMarkers(
         element: PsiElement, result: MutableCollection<in RelatedItemLineMarkerInfo<*>>
     ) {
-        if (element !is PsiClass) {
-            return
+//        collectPandas(element)?.let { result.add(it) }
+        collectObservers(element)?.let { result.add(it) }
+    }
+
+    private fun collectObservers(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
+        if (element.containingFile.name != "DataTableView.java") return null
+        if (element is PsiMethodCallExpression) {
+            if (!element.text.startsWith("EventBus")) return null
+
+            element.containingFile?.virtualFile ?: return null
+            val project = element.project
+
+            // 找目标接口下的observe方法，获得来自的对象和订阅的事件，找到对象和发送事件(匹配所有子类)匹配的post调用
+            val tarMethod = element.resolveMethod() ?: return null
+            if (isBusObserveFun(project, tarMethod)) {
+                val callObj = element.getCallObj() ?: return null
+                val observeEventType = element.getObserveEventType() ?: return null
+                val targets = ArrayList<PsiElement>()
+
+                FilenameIndex.getAllFilesByExt(project, JavaFileType.DEFAULT_EXTENSION, GlobalSearchScope.projectScope(project))
+                    .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
+                    .forEach {
+                        val tarObjPostCalls = PsiTreeUtil.findChildrenOfAnyType(it, PsiMethodCallExpression::class.java)
+                            .filter { call -> call.isBusPostFun() }
+                            .filter { call -> call.getCallObj() == callObj }
+                            .filter { call -> call.getPostEventType() == observeEventType }
+                            .toList()
+                        targets.addAll(tarObjPostCalls)
+                    }
+                return createNavigationGutterIcon(element, targets)
+            }
         }
-        val psiClass: PsiClass = element
-        if (psiClass.containingFile.virtualFile == null) {
-            return
-        }
-        val targets: ArrayList<PsiElement> = ArrayList()
+        return null
+    }
+
+    private fun PsiMethodCallExpression.getObserveEventType() =
+        ((argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.typeArguments()
+            ?.firstOrNull() as? PsiClassReferenceType)?.resolve()
+
+    private fun PsiMethodCallExpression.getPostEventType() =
+        (argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.resolve()
+
+    private fun PsiMethodCallExpression.getCallObj() = (methodExpression.qualifierExpression as? PsiReferenceExpression)?.resolve() as? KtLightField
+
+    private fun getIBusClass(project: Project) = findKtClass(project, "com.nwpu.ucdp.util.IEventBus")
+
+    private fun getIBusFun(project: Project, funName: String) = getIBusClass(project)?.findFunctionByName(funName) as? KtFunction
+
+    private fun PsiCall.isBusPostFun() = resolveMethod()?.let { isBusPostFun(project, it) } ?: false
+
+    private fun PsiCall.isBusObserveFun() = resolveMethod()?.let { isBusObserveFun(project, it) } ?: false
+
+    private fun isBusPostFun(project: Project, tarMethod: PsiMethod): Boolean {
+        val iEventBusPostFun = getIBusFun(project, "post") ?: return false
+        return iEventBusPostFun.asPsiMethod()?.let { PsiSuperMethodUtil.isSuperMethod(tarMethod, it) } == true
+    }
+
+    private fun isBusObserveFun(project: Project, tarMethod: PsiMethod): Boolean {
+        val iEventBusObserveFun = getIBusFun(project, "observe") ?: return false
+        return iEventBusObserveFun.asPsiMethod()?.let { PsiSuperMethodUtil.isSuperMethod(tarMethod, it) } == true
+    }
+
+    private fun KtFunction?.asPsiMethod() = this?.getRepresentativeLightMethod()
+
+    private fun findKtClass(project: Project, fqName: String): KtClass? {
+        val searchResult = KotlinFullClassNameIndex.getInstance().get(fqName, project, GlobalSearchScope.allScope(project))
+        return searchResult.firstOrNull() as? KtClass
+    }
+
+    private fun collectPandas(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
+        val psiClass: PsiClass = element as? PsiClass ?: return null
+        psiClass.containingFile?.virtualFile ?: return null
+
+        val targets = ArrayList<PsiElement>()
 
         // 1. 查找与 class 类名同名的 xml 文件, 并追加到结果集合
         val xmlFile = FilenameIndex.getFilesByName(
-            psiClass.project, psiClass.name + ".xml", GlobalSearchScope.projectScope(psiClass.project)
+            psiClass.project,
+            psiClass.name + ".xml",
+            GlobalSearchScope.projectScope(psiClass.project)
         ).toList()
         targets.addAll(xmlFile)
 
         // 2. Json 属性 key 为 panda, 值为类名则添加到标记结果
         FileTypeIndex.getFiles(JsonFileType.INSTANCE, GlobalSearchScope.projectScope(psiClass.project))
-            .mapNotNull { vf -> PsiManager.getInstance(psiClass.project).findFile(vf) }.forEach { jsonFile ->
-                run {
-                    val jsonProperties =
-                        PsiTreeUtil.findChildrenOfAnyType(jsonFile, JsonProperty::class.java).stream().filter { jp ->
-                            jp.name == "panda" && jp.value != null && jp.value!!.text.replace("\"", "") == psiClass.name
-                        }.toList()
-                    targets.addAll(jsonProperties)
-                }
+            .mapNotNull { vf -> PsiManager.getInstance(psiClass.project).findFile(vf) }
+            .forEach { jsonFile ->
+                val jsonProperties = PsiTreeUtil.findChildrenOfAnyType(jsonFile, JsonProperty::class.java).stream()
+                    .filter { jp ->
+                        jp.name == "panda"
+                                && jp.value != null
+                                && jp.value!!.text.replace("\"", "") == psiClass.name
+                    }
+                    .toList()
+                targets.addAll(jsonProperties)
             }
 
-        // 构建导航样式
+        return psiClass.identifyingElement?.let { createNavigationGutterIcon(it, targets) }
+    }
+
+    /**
+     * 构建导航样式
+     */
+    private fun createNavigationGutterIcon(
+        navigationPoint: PsiElement,
+        targets: List<PsiElement>,
+    ): RelatedItemLineMarkerInfo<PsiElement> {
         val builder: NavigationGutterIconBuilder<PsiElement> =
             NavigationGutterIconBuilder.create(Icons.PANDA)
                 .setTargets(targets)
                 .setTooltipText("Navigate to Panda resource")
                 .setAlignment(GutterIconRenderer.Alignment.RIGHT)
-                .setCellRenderer(MyListCellRenderer())
-
-        if (null != psiClass.nameIdentifier) {
-            result.add(builder.createLineMarkerInfo(psiClass.nameIdentifier!!))
-        }
+                .setCellRenderer { MyListCellRenderer() }
+        return builder.createLineMarkerInfo(navigationPoint)
     }
 
     /**
