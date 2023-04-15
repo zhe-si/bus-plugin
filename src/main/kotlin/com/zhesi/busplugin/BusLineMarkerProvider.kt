@@ -64,18 +64,23 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
             element.containingFile?.virtualFile ?: return null
             val project = element.project
 
-            if (isBusObserveFun(project, element.getCallPsiMethod())) {
-                val callObj = element.getCallObj() ?: return null
-                val observeEventType = element.getObserveEventType() ?: return null
-                val targets = ArrayList<PsiElement>()
+            val observeEventType = if (isBusObserveFun(project, element.getCallPsiMethod())) {
+                element.getObserveEventType() ?: return null
+            } else if (element.getCallFunFqName() == "com.nwpu.ucdp.util.observe") {
+                element.getExtObserveEventType() ?: return null
+            } else return null
+            val callObj = element.getCallObj() ?: return null
+            val targets = ArrayList<PsiElement>()
 
-                addKtPostTargets(project, callObj, observeEventType, targets)
-                addJavaPostTargets(project, callObj, observeEventType, targets)
-                return createNavigationGutterIcon(element, targets)
-            }
+            addKtPostTargets(project, callObj, observeEventType, targets)
+            addJavaPostTargets(project, callObj, observeEventType, targets)
+            return createNavigationGutterIcon(element, targets)
         }
         return null
     }
+
+    private fun KtCallElement.getExtObserveEventType(): KtClassOrObject? =
+        (typeArguments.firstOrNull()?.typeReference?.typeElement as? KtUserType)?.referenceExpression?.resolve() as? KtClassOrObject
 
     private fun addKtPostTargets(
         project: Project,
@@ -118,6 +123,8 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     }
 
     private fun KtCallElement.getCallFun() = (calleeExpression as? KtReferenceExpression)?.resolve() as? KtNamedFunction
+
+    private fun KtCallElement.getCallFunFqName() = getCallFun()?.fqName?.asString()
 
     private fun KtCallElement.getCallPsiMethod() = getCallFun()?.asPsiMethod()
 
