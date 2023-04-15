@@ -51,22 +51,18 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     override fun collectNavigationMarkers(
         element: PsiElement, result: MutableCollection<in RelatedItemLineMarkerInfo<*>>
     ) {
-//        collectPandas(element)?.let { result.add(it) }
-//        collectObserversJava(element)?.let { result.add(it) }
+        collectObserversJava(element)?.let { result.add(it) }
         collectObserversKt(element)?.let { result.add(it) }
     }
 
     private fun collectObserversKt(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
-        if (element.containingFile.name != "Workspace.kt") return null
         if (element is KtCallElement) {
-            if (!element.text.startsWith("observe")) return null
-
             element.containingFile?.virtualFile ?: return null
             val project = element.project
 
             val observeEventType = if (isBusObserveFun(project, element.getCallPsiMethod())) {
                 element.getObserveEventType() ?: return null
-            } else if (element.getCallFunFqName() == "com.nwpu.ucdp.util.observe") {
+            } else if (element.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME) {
                 element.getExtObserveEventType() ?: return null
             } else return null
             val callObj = element.getCallObj() ?: return null
@@ -131,6 +127,7 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     private fun KtCallElement.getCallObj(): PsiField? {
         val rRef = (calleeExpression as KtNameReferenceExpression).getReceiverExpression() as? KtNameReferenceExpression ?: return null
         val rField: PsiField = when (val rPsi = rRef.getReferenceTargets(rRef.analyze()).singleOrNull()?.findPsi()) {
+            // TODO: 总线变量还未处理
             is KtObjectDeclaration -> rPsi.toLightClass()?.findFieldByName("INSTANCE", false) ?: return null
             else -> return null
         }
@@ -182,7 +179,7 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
 
     private fun PsiMethodCallExpression.getCallObj() = (methodExpression.qualifierExpression as? PsiReferenceExpression)?.resolve() as? PsiField
 
-    private fun getIBusClass(project: Project) = findKtClass(project, "com.nwpu.ucdp.util.IEventBus")
+    private fun getIBusClass(project: Project) = findKtClass(project, Configs.I_EVENT_BUS_FQ_NAME)
 
     private fun getIBusFun(project: Project, funName: String) = getIBusClass(project)?.findFunctionByName(funName) as? KtFunction
 
@@ -192,13 +189,13 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
 
     private fun isBusPostFun(project: Project, tarMethod: PsiMethod?): Boolean {
         if (tarMethod == null) return false
-        val iEventBusPostFun = getIBusFun(project, "post") ?: return false
+        val iEventBusPostFun = getIBusFun(project, Configs.EVENT_BUS_POST_FUN_NAME) ?: return false
         return iEventBusPostFun.asPsiMethod()?.let { tarMethod == it || PsiSuperMethodUtil.isSuperMethod(tarMethod, it) } == true
     }
 
     private fun isBusObserveFun(project: Project, tarMethod: PsiMethod?): Boolean {
         if (tarMethod == null) return false
-        val iEventBusObserveFun = getIBusFun(project, "observe") ?: return false
+        val iEventBusObserveFun = getIBusFun(project, Configs.EVENT_BUS_OBSERVE_FUN_NAME) ?: return false
         return iEventBusObserveFun.asPsiMethod()?.let { tarMethod == it || PsiSuperMethodUtil.isSuperMethod(tarMethod, it) } == true
     }
 
