@@ -1,4 +1,4 @@
-package com.zhesi.busplugin
+package com.zhesi.busplugin.config
 
 /**
  * **Configs**

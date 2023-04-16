@@ -5,18 +5,17 @@ import com.intellij.codeInsight.daemon.RelatedItemLineMarkerProvider
 import com.intellij.codeInsight.navigation.NavigationGutterIconBuilder
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.ide.util.DefaultPsiElementCellRenderer
-import com.intellij.json.JsonFileType
 import com.intellij.json.psi.JsonProperty
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.PsiClassReferenceType
-import com.intellij.psi.search.FileTypeIndex
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiSuperMethodUtil
 import com.intellij.psi.util.PsiTreeUtil
 import com.zhesi.busplugin.common.Icons
+import com.zhesi.busplugin.config.Configs
 import org.jetbrains.kotlin.asJava.getRepresentativeLightMethod
 import org.jetbrains.kotlin.asJava.toLightClass
 import org.jetbrains.kotlin.idea.KotlinFileType
@@ -34,7 +33,6 @@ import org.jetbrains.kotlin.resolve.bindingContextUtil.getReferenceTargets
 import org.jetbrains.kotlin.resolve.calls.util.getType
 import org.jetbrains.kotlin.types.isError
 import javax.swing.Icon
-import kotlin.streams.toList
 
 /**
  * **BusLineMarkerProvider**
@@ -42,7 +40,7 @@ import kotlin.streams.toList
  * 组件间交互逻辑可读性：生成某个事件的发布订阅依赖关系图
  * 1. 根据订阅查看对应事件发布者
  * 2. 根据发布者查看所有订阅
- * 3. 从observe查看所有事件
+ * 3. 从窗口查看所有事件
  *
  * @author lq
  * @version 1.0
@@ -53,8 +51,68 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     ) {
         collectObserversJava(element)?.let { result.add(it) }
         collectObserversKt(element)?.let { result.add(it) }
+
+        collectPostJava(element)?.let { result.add(it) }
+        collectPostKt(element)?.let { result.add(it) }
     }
 
+    /**
+     * 标记所有 java 发布者
+     */
+    private fun collectPostJava(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
+        if (element is PsiMethodCallExpression) {
+            element.containingFile?.virtualFile ?: return null
+            val project = element.project
+
+            if (element.isBusPostFun()) {
+                val callObj = element.getCallObj() ?: return null
+                val postEventType = element.getPostEventType() ?: return null
+
+                val targets = ArrayList<PsiElement>()
+                addJavaFunTargets(project, callObj, postEventType, targets, { isBusObserveFun() }) { getObserveEventType() }
+                addKtFunTargets(project, callObj, postEventType, targets, { pro, call ->
+                    isBusObserveFun(pro, call.getCallPsiMethod())
+                }) { getObserveEventType() }
+                addKtFunTargets(project, callObj, postEventType, targets, { _, call ->
+                    call.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME
+                }) { getExtObserveEventType() }
+
+                return createNavigationGutterIcon(element, targets, Icons.POST, Icons.OBSERVE)
+            }
+        }
+        return null
+    }
+
+    /**
+     * 标记所有 kotlin 发布者
+     */
+    private fun collectPostKt(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
+        if (element is KtCallElement) {
+            element.containingFile?.virtualFile ?: return null
+            val project = element.project
+
+            val postEventType = if (isBusPostFun(project, element.getCallPsiMethod())) {
+                element.getPostEventType() ?: return null
+            } else return null
+            val callObj = element.getCallObj() ?: return null
+
+            val targets = ArrayList<PsiElement>()
+            addJavaFunTargets(project, callObj, postEventType, targets, { isBusObserveFun() }) { getObserveEventType() }
+            addKtFunTargets(project, callObj, postEventType, targets, { pro, call ->
+                isBusObserveFun(pro, call.getCallPsiMethod())
+            }) { getObserveEventType() }
+            addKtFunTargets(project, callObj, postEventType, targets, { _, call ->
+                call.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME
+            }) { getExtObserveEventType() }
+
+            return createNavigationGutterIcon(element, targets, Icons.POST, Icons.OBSERVE)
+        }
+        return null
+    }
+
+    /**
+     * 标记所有 kotlin 订阅者
+     */
     private fun collectObserversKt(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
         if (element is KtCallElement) {
             element.containingFile?.virtualFile ?: return null
@@ -66,11 +124,14 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
                 element.getExtObserveEventType() ?: return null
             } else return null
             val callObj = element.getCallObj() ?: return null
-            val targets = ArrayList<PsiElement>()
 
-            addKtPostTargets(project, callObj, observeEventType, targets)
-            addJavaPostTargets(project, callObj, observeEventType, targets)
-            return createNavigationGutterIcon(element, targets)
+            val targets = ArrayList<PsiElement>()
+            addJavaFunTargets(project, callObj, observeEventType, targets, { isBusPostFun() }) { getPostEventType() }
+            addKtFunTargets(project, callObj, observeEventType, targets, { pro, call ->
+                isBusPostFun(pro, call.getCallPsiMethod())
+            }) { getPostEventType() }
+
+            return createNavigationGutterIcon(element, targets, Icons.OBSERVE, Icons.POST)
         }
         return null
     }
@@ -78,22 +139,34 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     private fun KtCallElement.getExtObserveEventType(): KtClassOrObject? =
         (typeArguments.firstOrNull()?.typeReference?.typeElement as? KtUserType)?.referenceExpression?.resolve() as? KtClassOrObject
 
-    private fun addKtPostTargets(
+    private fun addKtFunTargets(
         project: Project,
         callObj: PsiField,
         observeEventType: PsiElement,
-        targets: ArrayList<PsiElement>
+        targets: ArrayList<PsiElement>,
+        tarFunFilter: (Project, KtCallElement) -> Boolean,
+        eventTypeGetter: KtCallElement.() -> KtClassOrObject?,
     ) {
         FilenameIndex.getAllFilesByExt(project, KotlinFileType.EXTENSION, GlobalSearchScope.projectScope(project))
             .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
             .forEach { psiFile ->
                 val tarObjPostCalls = PsiTreeUtil.findChildrenOfAnyType(psiFile, KtCallElement::class.java)
-                    .filter { call -> isBusPostFun(project, call.getCallPsiMethod()) }
-                    .filter { call -> call.getCallObj() == callObj }
-                    .filter { call -> call.getPostEventType()?.getKotlinFqName()?.let { it == observeEventType.getKotlinFqName() } ?: false }
+                    .filter { call -> tarFunFilter(project, call) }
+                    .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
+                    .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
+    }
+
+    private fun isEventTypeEqual(type1: PsiElement?, type2: PsiElement?): Boolean {
+        if (type1 == null || type2 == null) return false
+        return type1.getKotlinFqName()?.let { it == type2.getKotlinFqName() } == true
+    }
+
+    private fun isFieldEqual(f1: PsiField?, f2: PsiField?): Boolean {
+        if (f1 == null || f2 == null) return false
+        return f1 == f2 || f1.getKotlinFqName()?.let { it == f2.getKotlinFqName() } == true
     }
 
     private fun KtCallElement.getPostEventType(): KtClassOrObject? {
@@ -127,13 +200,19 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     private fun KtCallElement.getCallObj(): PsiField? {
         val rRef = (calleeExpression as KtNameReferenceExpression).getReceiverExpression() as? KtNameReferenceExpression ?: return null
         val rField: PsiField = when (val rPsi = rRef.getReferenceTargets(rRef.analyze()).singleOrNull()?.findPsi()) {
-            // TODO: 总线变量还未处理
             is KtObjectDeclaration -> rPsi.toLightClass()?.findFieldByName("INSTANCE", false) ?: return null
+            is KtProperty -> {
+                // TODO: kotlin入口查找总线变量无法转换为 PsiField，java可以
+                return null
+            }
             else -> return null
         }
         return rField
     }
 
+    /**
+     * 标记所有 java 订阅者
+     */
     private fun collectObserversJava(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
         if (element is PsiMethodCallExpression) {
             element.containingFile?.virtualFile ?: return null
@@ -143,28 +222,34 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
             if (element.isBusObserveFun()) {
                 val callObj = element.getCallObj() ?: return null
                 val observeEventType = element.getObserveEventType() ?: return null
+
                 val targets = ArrayList<PsiElement>()
-                addJavaPostTargets(project, callObj, observeEventType, targets)
-                addKtPostTargets(project, callObj, observeEventType, targets)
-                return createNavigationGutterIcon(element, targets)
+                addJavaFunTargets(project, callObj, observeEventType, targets, { isBusPostFun() }) { getPostEventType() }
+                addKtFunTargets(project, callObj, observeEventType, targets, { pro, call ->
+                    isBusPostFun(pro, call.getCallPsiMethod())
+                }) { getPostEventType() }
+
+                return createNavigationGutterIcon(element, targets, Icons.OBSERVE, Icons.POST)
             }
         }
         return null
     }
 
-    private fun addJavaPostTargets(
+    private fun addJavaFunTargets(
         project: Project,
         callObj: PsiField,
         observeEventType: PsiElement,
-        targets: ArrayList<PsiElement>
+        targets: ArrayList<PsiElement>,
+        tarFunFilter: PsiCall.() -> Boolean,
+        eventTypeGetter: PsiMethodCallExpression.() -> PsiClass?,
     ) {
         FilenameIndex.getAllFilesByExt(project, JavaFileType.DEFAULT_EXTENSION, GlobalSearchScope.projectScope(project))
             .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
             .forEach { psiFile ->
                 val tarObjPostCalls = PsiTreeUtil.findChildrenOfAnyType(psiFile, PsiMethodCallExpression::class.java)
-                    .filter { call -> call.isBusPostFun() }
-                    .filter { call -> call.getCallObj() == callObj }
-                    .filter { call -> call.getPostEventType()?.getKotlinFqName()?.let { it == observeEventType.getKotlinFqName() } ?: false }
+                    .filter { call -> call.tarFunFilter() }
+                    .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
+                    .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
@@ -206,57 +291,28 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
         return searchResult.singleOrNull()
     }
 
-    private fun collectPandas(element: PsiElement): RelatedItemLineMarkerInfo<PsiElement>? {
-        val psiClass: PsiClass = element as? PsiClass ?: return null
-        psiClass.containingFile?.virtualFile ?: return null
-
-        val targets = ArrayList<PsiElement>()
-
-        // 1. 查找与 class 类名同名的 xml 文件, 并追加到结果集合
-        val xmlFile = FilenameIndex.getFilesByName(
-            psiClass.project,
-            psiClass.name + ".xml",
-            GlobalSearchScope.projectScope(psiClass.project)
-        ).toList()
-        targets.addAll(xmlFile)
-
-        // 2. Json 属性 key 为 panda, 值为类名则添加到标记结果
-        FileTypeIndex.getFiles(JsonFileType.INSTANCE, GlobalSearchScope.projectScope(psiClass.project))
-            .mapNotNull { vf -> PsiManager.getInstance(psiClass.project).findFile(vf) }
-            .forEach { jsonFile ->
-                val jsonProperties = PsiTreeUtil.findChildrenOfAnyType(jsonFile, JsonProperty::class.java).stream()
-                    .filter { jp ->
-                        jp.name == "panda"
-                                && jp.value != null
-                                && jp.value!!.text.replace("\"", "") == psiClass.name
-                    }
-                    .toList()
-                targets.addAll(jsonProperties)
-            }
-
-        return psiClass.identifyingElement?.let { createNavigationGutterIcon(it, targets) }
-    }
-
     /**
      * 构建导航样式
      */
     private fun createNavigationGutterIcon(
         navigationPoint: PsiElement,
         targets: List<PsiElement>,
+        lineIcon: Icon,
+        targetIcon: Icon,
     ): RelatedItemLineMarkerInfo<PsiElement> {
         val builder: NavigationGutterIconBuilder<PsiElement> =
-            NavigationGutterIconBuilder.create(Icons.PANDA)
+            NavigationGutterIconBuilder.create(lineIcon)
                 .setTargets(targets)
                 .setTooltipText("Navigate to Panda resource")
                 .setAlignment(GutterIconRenderer.Alignment.RIGHT)
-                .setCellRenderer { MyListCellRenderer() }
+                .setCellRenderer { TargetCellRenderer(targetIcon) }
         return builder.createLineMarkerInfo(navigationPoint)
     }
 
     /**
      * 单元格渲染
      */
-    private class MyListCellRenderer : DefaultPsiElementCellRenderer() {
+    private class TargetCellRenderer(val targetIcon: Icon) : DefaultPsiElementCellRenderer() {
         override fun getElementText(element: PsiElement): String {
             val prefix = StringBuilder()
             if (element is JsonProperty) {
@@ -266,7 +322,7 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
         }
 
         override fun getIcon(element: PsiElement): Icon {
-            return Icons.PANDA
+            return targetIcon
         }
     }
 }
