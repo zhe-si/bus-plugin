@@ -12,8 +12,8 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.zhesi.busplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <codeInsight.lineMarkerProvider language="JAVA" implementationClass="com.zhesi.busplugin.BusLineMarkerProvider"/>
-        <codeInsight.lineMarkerProvider language="kotlin" implementationClass="com.zhesi.busplugin.BusLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="JAVA" implementationClass="com.zhesi.busplugin.lineMarker.BusLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin" implementationClass="com.zhesi.busplugin.lineMarker.BusLineMarkerProvider"/>
     </extensions>
 
     <applicationListeners>
