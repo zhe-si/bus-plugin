@@ -1,10 +1,15 @@
 package com.zhesi.busplugin.common
 
+import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.PsiClassReferenceType
+import com.intellij.psi.search.FilenameIndex
+import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiSuperMethodUtil
+import com.intellij.psi.util.PsiTreeUtil
 import com.zhesi.busplugin.config.Configs
+import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.utils.fqname.fqName
 import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
@@ -87,3 +92,55 @@ fun KtCallElement.getExtObserveEventType(): KtClassOrObject? =
 fun PsiMethodCallExpression.getObserveEventType(): PsiClass? =
     ((argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.typeArguments()
         ?.firstOrNull() as? PsiClassReferenceType)?.resolve()
+
+fun getAllEventType(project: Project): LinkedHashMap<String, MutableList<PsiElement>> {
+    val objEventMap = LinkedHashMap<String, MutableList<PsiElement>>()
+    val objMap = HashMap<String, MutableList<PsiField>>()
+    FilenameIndex.getAllFilesByExt(project, KotlinFileType.EXTENSION, GlobalSearchScope.projectScope(project))
+        .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
+        .forEach { psiFile ->
+            for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, KtCallElement::class.java)) {
+                val obj = call.getCallObj()
+                val objFqName = obj?.getKotlinFqName()?.asString() ?: continue
+                objMap.getOrPut(objFqName) { mutableListOf() }.let {
+                    if (!it.contains(obj)) it.add(obj)
+                }
+
+                val event = if (isBusPostFun(project, call.getCallPsiMethod())) {
+                    call.getPostEventType()
+                } else if (isBusObserveFun(project, call.getCallPsiMethod())) {
+                    call.getObserveEventType()
+                } else if (call.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME) {
+                    call.getExtObserveEventType()
+                } else null
+                event?.let { e ->
+                    objEventMap.getOrPut(objFqName) { mutableListOf() }.let {
+                        if (!it.contains(e)) it.add(e)
+                    }
+                } ?: continue
+            }
+        }
+    FilenameIndex.getAllFilesByExt(project, JavaFileType.DEFAULT_EXTENSION, GlobalSearchScope.projectScope(project))
+        .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
+        .forEach { psiFile ->
+            for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, PsiMethodCallExpression::class.java)) {
+                val obj = call.getCallObj()
+                val objFqName = obj?.getKotlinFqName()?.asString() ?: continue
+                objMap.getOrPut(objFqName) { mutableListOf() }.let {
+                    if (!it.contains(obj)) it.add(obj)
+                }
+
+                val event = if (call.isBusPostFun()) {
+                    call.getPostEventType()
+                } else if (call.isBusObserveFun()) {
+                    call.getObserveEventType()
+                } else null
+                event?.let { e ->
+                    objEventMap.getOrPut(objFqName) { mutableListOf() }.let {
+                        if (!it.contains(e)) it.add(e)
+                    }
+                } ?: continue
+            }
+        }
+    return objEventMap
+}

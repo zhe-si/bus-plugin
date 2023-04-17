@@ -16,4 +16,6 @@ object Icons {
     val BUS = IconLoader.getIcon("/images/bus.svg", Icons::class.java)
     val POST = IconLoader.getIcon("/images/post.svg", Icons::class.java)
     val OBSERVE = IconLoader.getIcon("/images/observe.svg", Icons::class.java)
+    val BUS_OBJ = IconLoader.getIcon("/images/busObj.svg", Icons::class.java)
+    val EVENT = IconLoader.getIcon("/images/event.svg", Icons::class.java)
 }

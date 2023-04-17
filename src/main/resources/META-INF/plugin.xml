@@ -8,15 +8,13 @@
     <depends>com.intellij.java</depends>
     <depends>org.jetbrains.kotlin</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.zhesi.busplugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <codeInsight.lineMarkerProvider language="JAVA" implementationClass="com.zhesi.busplugin.lineMarker.BusLineMarkerProvider"/>
-        <codeInsight.lineMarkerProvider language="kotlin" implementationClass="com.zhesi.busplugin.lineMarker.BusLineMarkerProvider"/>
+        <toolWindow factoryClass="com.zhesi.busplugin.toolwindow.EventBusToolWindowFactory" id="EventBus" icon="/images/toolWindowIcon.svg" anchor="right" secondary="true"/>
+
+        <codeInsight.lineMarkerProvider language="JAVA" implementationClass="com.zhesi.busplugin.linemarker.EventBusLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin" implementationClass="com.zhesi.busplugin.linemarker.EventBusLineMarkerProvider"/>
     </extensions>
 
     <applicationListeners>
-        <listener class="com.zhesi.busplugin.listeners.MyFrameStateListener" topic="com.intellij.ide.FrameStateListener"/>
     </applicationListeners>
 </idea-plugin>

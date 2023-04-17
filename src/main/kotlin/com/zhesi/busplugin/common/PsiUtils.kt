@@ -38,7 +38,7 @@ fun KtCallElement.getCallPsiMethod() = getCallFun()?.asPsiMethod()
 fun PsiMethodCallExpression.getCallObj() = (methodExpression.qualifierExpression as? PsiReferenceExpression)?.resolve() as? PsiField
 
 fun KtCallElement.getCallObj(): PsiField? {
-    val rRef = (calleeExpression as KtNameReferenceExpression).getReceiverExpression() as? KtNameReferenceExpression ?: return null
+    val rRef = (calleeExpression as? KtNameReferenceExpression)?.getReceiverExpression() as? KtNameReferenceExpression ?: return null
     val rField: PsiField = when (val rPsi = rRef.getReferenceTargets(rRef.analyze()).singleOrNull()?.findPsi()) {
         is KtObjectDeclaration -> rPsi.toLightClass()?.findFieldByName("INSTANCE", false) ?: return null
         is KtProperty -> {

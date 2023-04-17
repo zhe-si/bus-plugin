@@ -1,4 +1,4 @@
-package com.zhesi.busplugin.lineMarker
+package com.zhesi.busplugin.linemarker
 
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerInfo
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerProvider
@@ -19,7 +19,7 @@ import org.jetbrains.kotlin.psi.KtClassOrObject
 import javax.swing.Icon
 
 /**
- * **BusLineMarkerProvider**
+ * **EventBusLineMarkerProvider**
  *
  * 组件间交互逻辑可读性：生成某个事件的发布订阅依赖关系图
  * 1. 根据订阅查看对应事件发布者
@@ -29,7 +29,7 @@ import javax.swing.Icon
  * @author lq
  * @version 1.0
  */
-class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
+class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     override fun collectNavigationMarkers(
         element: PsiElement, result: MutableCollection<in RelatedItemLineMarkerInfo<*>>
     ) {
@@ -167,6 +167,7 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
                     .filter { call -> tarFunFilter(project, call) }
                     .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
                     .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
+                    .map { call -> call.navigationElement }
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
@@ -187,6 +188,7 @@ class BusLineMarkerProvider : RelatedItemLineMarkerProvider() {
                     .filter { call -> call.tarFunFilter() }
                     .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
                     .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
+                    .map { call -> call.navigationElement }
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
