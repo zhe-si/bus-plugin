@@ -18,6 +18,10 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
 import com.zhesi.busplugin.common.Icons
 import com.zhesi.busplugin.common.getAllEventType
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
@@ -50,6 +54,7 @@ class EventBusToolWindowFactory : ToolWindowFactory {
 
     class EventBusToolWindow(private val project: Project) {
         private val rootNode = createTreeNode(EventBusTreeItemData("总线事件", Icons.BUS))
+        private val runScope = CoroutineScope(CoroutineName("EventBusToolWindowRunScope") + Dispatchers.Default)
 
         fun getContent(): JBPanel<JBPanel<*>> {
             return JBPanel<JBPanel<*>>(BorderLayout(7, 7)).apply {
@@ -69,16 +74,18 @@ class EventBusToolWindowFactory : ToolWindowFactory {
                 val actionGroup = DefaultActionGroup(ID_ACTION_GROUP, false).apply {
                     add(object : AnAction(AllIcons.Actions.Refresh) {
                         override fun actionPerformed(e: AnActionEvent) {
-                            val (objMap, objEventMap) = getAllEventType(project)
-                            val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
-                            for ((objFqName, eventList) in objEventMap.entries) {
-                                objMap[objFqName]?.firstOrNull()?.let { obj ->
-                                    resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
-                                        EventBusTreeItemData(it, Icons.EVENT)
+                            runScope.launch(Dispatchers.IO) {
+                                val (objMap, objEventMap) = getAllEventType(project)
+                                val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
+                                for ((objFqName, eventList) in objEventMap.entries) {
+                                    objMap[objFqName]?.firstOrNull()?.let { obj ->
+                                        resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
+                                            EventBusTreeItemData(it, Icons.EVENT)
+                                        }
                                     }
                                 }
+                                setTreeData(resultMap)
                             }
-                            setTreeData(resultMap)
                         }
                     })
                 }
