@@ -1,5 +1,6 @@
 package com.zhesi.busplugin.toolwindow
 
+import com.intellij.codeInsight.navigation.NavigationUtil
 import com.intellij.icons.AllIcons
 import com.intellij.ide.util.treeView.NodeDescriptor
 import com.intellij.openapi.actionSystem.ActionManager
@@ -9,6 +10,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.psi.PsiElement
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.panels.VerticalLayout
@@ -18,6 +20,8 @@ import com.zhesi.busplugin.common.Icons
 import com.zhesi.busplugin.common.getAllEventType
 import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import java.awt.BorderLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.Icon
 import javax.swing.JSeparator
 import javax.swing.tree.DefaultMutableTreeNode
@@ -50,17 +54,28 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         fun getContent(): JBPanel<JBPanel<*>> {
             return JBPanel<JBPanel<*>>(BorderLayout(7, 7)).apply {
                 val eventTree = Tree(rootNode)
+                eventTree.addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent?) {
+                        if (e?.clickCount == 2) {
+                            val node = eventTree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+                            val psiElement = ((node.userObject as? EventBusNodeDescriptor)?.element as? EventBusTreeItemData)?.data as? PsiElement ?: return
+                            NavigationUtil.activateFileWithPsiElement(psiElement, true)
+                        }
+                    }
+                })
                 val scrollPane = JBScrollPane(eventTree).apply { border = null }
                 add(scrollPane, BorderLayout.CENTER)
 
                 val actionGroup = DefaultActionGroup(ID_ACTION_GROUP, false).apply {
                     add(object : AnAction(AllIcons.Actions.Refresh) {
                         override fun actionPerformed(e: AnActionEvent) {
-                            val objEventMap = getAllEventType(project)
+                            val (objMap, objEventMap) = getAllEventType(project)
                             val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
-                            for ((obj, eventList) in objEventMap.entries) {
-                                resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
-                                    EventBusTreeItemData(it.getKotlinFqName()?.asString() ?: it.text, Icons.EVENT)
+                            for ((objFqName, eventList) in objEventMap.entries) {
+                                objMap[objFqName]?.firstOrNull()?.let { obj ->
+                                    resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
+                                        EventBusTreeItemData(it, Icons.EVENT)
+                                    }
                                 }
                             }
                             setTreeData(resultMap)
@@ -115,7 +130,9 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         }
 
         data class EventBusTreeItemData(val data: Any, val icon: Icon? = null) {
-            override fun toString(): String = data.toString()
+            override fun toString(): String =
+                if (data is PsiElement) data.getKotlinFqName()?.asString() ?: data.text
+                else data.toString()
         }
 
         companion object {
