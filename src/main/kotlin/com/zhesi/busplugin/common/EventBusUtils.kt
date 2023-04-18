@@ -3,6 +3,7 @@ package com.zhesi.busplugin.common
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.wm.WindowManager
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.PsiClassReferenceType
 import com.intellij.psi.search.FilenameIndex
@@ -22,6 +23,8 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.findFunctionByName
 import org.jetbrains.kotlin.resolve.calls.util.getType
 import org.jetbrains.kotlin.types.isError
+import java.math.RoundingMode
+import java.text.DecimalFormat
 
 /**
  * **EventBusUtils**
@@ -101,53 +104,84 @@ suspend fun getAllEventType(
 ): Pair<HashMap<String, MutableList<PsiField>>, LinkedHashMap<String, MutableList<PsiElement>>> {
     val objMap = HashMap<String, MutableList<PsiField>>()
     val objEventMap = LinkedHashMap<String, MutableList<PsiElement>>()
+
+    val statusBar = WindowManager.getInstance().getStatusBar(project)
+    statusBar.startRefreshIndication("Searching all events.")
+
     coroutineScope {
-        smartReadAction(project) { FilenameIndex.getAllFilesByExt(project, KotlinFileType.EXTENSION, GlobalSearchScope.projectScope(project)) }
-            .mapNotNull { vf -> smartReadAction(project) { PsiManager.getInstance(project).findFile(vf) } }
-            .forEach { psiFile ->
-                launch {
-                    smartReadAction(project) {
-                        for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, KtCallElement::class.java)) {
-                            val event = if (isBusPostFun(project, call.getCallPsiMethod())) {
-                                call.getPostEventType()
-                            } else if (isBusObserveFun(project, call.getCallPsiMethod())) {
-                                call.getObserveEventType()
-                            } else if (call.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME) {
-                                call.getExtObserveEventType()
-                            } else null
+        val ktFiles = getAllFiles(project, KotlinFileType.EXTENSION)
+        statusBar.info = getSearchingMsg(0.05)
+        val javaFiles = getAllFiles(project, JavaFileType.DEFAULT_EXTENSION)
+        statusBar.info = getSearchingMsg(0.10)
 
-                            if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap)) continue
-                        }
+        val filesNum = ((ktFiles.size + javaFiles.size) / 0.90).toInt()
+        var nowFinishNum = filesNum / 10
+
+        ktFiles.forEach { psiFile ->
+            launch {
+                smartReadAction(project) {
+                    for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, KtCallElement::class.java)) {
+                        val event = if (isBusPostFun(project, call.getCallPsiMethod())) {
+                            call.getPostEventType()
+                        } else if (isBusObserveFun(project, call.getCallPsiMethod())) {
+                            call.getObserveEventType()
+                        } else if (call.getCallFunFqName() == Configs.EXT_OBSERVER_FUN_FQ_NAME) {
+                            call.getExtObserveEventType()
+                        } else null
+
+                        if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
+                            nowFinishNum++
+                            statusBar.info = getSearchingMsg(nowFinishNum, filesNum)
+                        }) continue
                     }
                 }
             }
-        smartReadAction(project) { FilenameIndex.getAllFilesByExt(project, JavaFileType.DEFAULT_EXTENSION, GlobalSearchScope.projectScope(project)) }
-            .mapNotNull { vf -> smartReadAction(project) { PsiManager.getInstance(project).findFile(vf) } }
-            .forEach { psiFile ->
-                launch {
-                    smartReadAction(project) {
-                        for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, PsiMethodCallExpression::class.java)) {
-                            val event = if (call.isBusPostFun()) {
-                                call.getPostEventType()
-                            } else if (call.isBusObserveFun()) {
-                                call.getObserveEventType()
-                            } else null
+        }
+        javaFiles.forEach { psiFile ->
+            launch {
+                smartReadAction(project) {
+                    for (call in PsiTreeUtil.findChildrenOfAnyType(psiFile, PsiMethodCallExpression::class.java)) {
+                        val event = if (call.isBusPostFun()) {
+                            call.getPostEventType()
+                        } else if (call.isBusObserveFun()) {
+                            call.getObserveEventType()
+                        } else null
 
-                            if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap)) continue
-                        }
+                        if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
+                            nowFinishNum++
+                            statusBar.info = getSearchingMsg(nowFinishNum, filesNum)
+                        }) continue
                     }
                 }
             }
+        }
     }
+
+    statusBar.stopRefreshIndication()
+    statusBar.info = "Finish search events."
+
     return objMap to objEventMap
 }
+
+private fun getSearchingMsg(nowNum: Int, allNum: Int): String = "Searching events: ${getPercentMsg(nowNum, allNum)}%"
+private fun getSearchingMsg(value: Double): String = "Searching events: ${getPercentMsg(value)}%"
+
+private val percentFormatter = DecimalFormat("##.##").apply { roundingMode = RoundingMode.FLOOR }
+private fun getPercentMsg(value: Double): String =
+    percentFormatter.format(100.0 * value)
+private fun getPercentMsg(nowNum: Int, allNum: Int): String = getPercentMsg(nowNum.toDouble() / allNum.toDouble())
+
+private suspend fun getAllFiles(project: Project, fileType: String) =
+    smartReadAction(project) { FilenameIndex.getAllFilesByExt(project, fileType, GlobalSearchScope.projectScope(project)) }
+        .mapNotNull { vf -> smartReadAction(project) { PsiManager.getInstance(project).findFile(vf) } }
 
 @Synchronized
 private fun addEventTypeMap(
     obj: PsiField?,
     event: PsiElement?,
     objMap: HashMap<String, MutableList<PsiField>>,
-    objEventMap: LinkedHashMap<String, MutableList<PsiElement>>
+    objEventMap: LinkedHashMap<String, MutableList<PsiElement>>,
+    successfulCallback: () -> Unit,
 ): Boolean {
     obj ?: return false
     event ?: return false
@@ -160,5 +194,6 @@ private fun addEventTypeMap(
         if (!it.contains(event)) it.add(event)
     }
 
+    successfulCallback()
     return true
 }
