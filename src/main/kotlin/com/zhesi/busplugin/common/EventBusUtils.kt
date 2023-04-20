@@ -17,11 +17,11 @@ import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.utils.fqname.fqName
 import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
-import org.jetbrains.kotlin.idea.core.resolveType
 import org.jetbrains.kotlin.nj2k.postProcessing.resolve
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.findFunctionByName
 import org.jetbrains.kotlin.resolve.calls.util.getType
+import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import org.jetbrains.kotlin.types.isError
 import java.math.RoundingMode
 import java.text.DecimalFormat
@@ -67,7 +67,8 @@ fun isFieldEqual(f1: PsiField?, f2: PsiField?): Boolean {
 
 
 fun KtCallElement.getPostEventType(): KtClassOrObject? {
-    return valueArguments.firstOrNull()?.getArgumentExpression()?.resolveType()?.fqName?.asString()
+    return valueArguments.firstOrNull()?.getArgumentExpression()
+        ?.let { it.analyze(BodyResolveMode.PARTIAL).getType(it) }?.fqName?.asString()
         ?.let { findKtClass(project, it) }
 }
 
