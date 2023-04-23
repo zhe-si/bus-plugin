@@ -3,6 +3,7 @@
     <id>com.zhesi.busplugin</id>
     <name>Bus Tools</name>
     <vendor>zhe-si</vendor>
+    <version>0.0.1</version>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.java</depends>

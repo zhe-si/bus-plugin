@@ -2,6 +2,12 @@
 
 # bus-plugin Changelog
 
-## [Unreleased]
+## [0.0.1]
 ### Added
-- Initial scaffold created from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
+- 在订阅事件处查看对应事件的发布者
+- 在发布事件处查看对应事件的订阅者
+- 在工具栏查看所有事件
+
+
+## [0.0.2]
+### Added

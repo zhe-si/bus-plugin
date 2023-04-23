@@ -37,6 +37,14 @@ import javax.swing.tree.DefaultMutableTreeNode
  * 组件间交互逻辑可读性：生成某个事件的发布订阅依赖关系图
  * 1. 从窗口查看所有事件
  *
+ * 0.0.2
+ * TODO: 分层级查看事件，基于某种规则聚类事件
+ * TODO: 添加设置（各种配置，事件展示聚类方式设定）
+ * TODO: 事件命名规范检查（提示在toolwindow或代码上）
+ *
+ * 0.0.3
+ * TODO: 调试的运行时事件流转记录查看支持
+ *
  * @author lq
  * @version 1.0
  */
