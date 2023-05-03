@@ -64,36 +64,28 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         private val rootNode = createTreeNode(EventBusTreeItemData("总线事件", Icons.BUS))
         private val runScope = CoroutineScope(CoroutineName("EventBusToolWindowRunScope") + Dispatchers.Default)
 
+        /**
+         * 创建一个新的工具栏组件
+         */
         fun getContent(): JBPanel<JBPanel<*>> {
             return JBPanel<JBPanel<*>>(BorderLayout(7, 7)).apply {
+                // 展示内容面板
                 val eventTree = Tree(rootNode)
                 eventTree.addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent?) {
                         if (e?.clickCount == 2) {
-                            val node = eventTree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
-                            val psiElement = ((node.userObject as? EventBusNodeDescriptor)?.element as? EventBusTreeItemData)?.data as? PsiElement ?: return
-                            NavigationUtil.activateFileWithPsiElement(psiElement, true)
+                            nativeSelectedElement(eventTree)
                         }
                     }
                 })
                 val scrollPane = JBScrollPane(eventTree).apply { border = null }
                 add(scrollPane, BorderLayout.CENTER)
 
+                // 工具栏
                 val actionGroup = DefaultActionGroup(ID_ACTION_GROUP, false).apply {
                     add(object : AnAction(AllIcons.Actions.Refresh) {
                         override fun actionPerformed(e: AnActionEvent) {
-                            runScope.launch(Dispatchers.IO) {
-                                val (objMap, objEventMap) = getAllEventType(project)
-                                val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
-                                for ((objFqName, eventList) in objEventMap.entries) {
-                                    objMap[objFqName]?.firstOrNull()?.let { obj ->
-                                        resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
-                                            EventBusTreeItemData(it, Icons.EVENT)
-                                        }
-                                    }
-                                }
-                                setTreeData(resultMap)
-                            }
+                            updateEvents()
                         }
                     })
                 }
@@ -108,6 +100,9 @@ class EventBusToolWindowFactory : ToolWindowFactory {
             }
         }
 
+        /**
+         * 设置展示的内容
+         */
         fun setTreeData(data: Any?) {
             rootNode.removeAllChildren()
             _setTreeData(rootNode, data)
@@ -133,8 +128,38 @@ class EventBusToolWindowFactory : ToolWindowFactory {
             }
         }
 
+        /**
+         * 更新事件信息并设置到展示内容
+         */
+        private fun updateEvents() {
+            runScope.launch(Dispatchers.IO) {
+                val (objMap, objEventMap) = getAllEventType(project)
+                val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
+                for ((objFqName, eventList) in objEventMap.entries) {
+                    objMap[objFqName]?.firstOrNull()?.let { obj ->
+                        resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
+                            EventBusTreeItemData(it, Icons.EVENT)
+                        }
+                    }
+                }
+                setTreeData(resultMap)
+            }
+        }
+
+        /**
+         * 导航到内容面板当前选中项的位置
+         */
+        private fun nativeSelectedElement(eventTree: Tree) {
+            val node = eventTree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
+            val psiElement = ((node.userObject as? EventBusNodeDescriptor)?.element as? EventBusTreeItemData)?.data as? PsiElement ?: return
+            NavigationUtil.activateFileWithPsiElement(psiElement, true)
+        }
+
         private fun createTreeNode(data: Any) = DefaultMutableTreeNode(EventBusNodeDescriptor(data))
 
+        /**
+         * 节点包装器，用于设置节点图标等信息
+         */
         private inner class EventBusNodeDescriptor(private val data: Any) : NodeDescriptor<Any>(project, null) {
             init {
                 if (data is EventBusTreeItemData) data.icon?.let { icon = it }
@@ -155,4 +180,5 @@ class EventBusToolWindowFactory : ToolWindowFactory {
             const val ID_ACTION_TOOLBAR = "EventBusActionToolBar"
         }
     }
+
 }

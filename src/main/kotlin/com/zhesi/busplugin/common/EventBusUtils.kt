@@ -3,7 +3,6 @@ package com.zhesi.busplugin.common
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.WindowManager
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.PsiClassReferenceType
 import com.intellij.psi.search.FilenameIndex
@@ -23,8 +22,6 @@ import org.jetbrains.kotlin.psi.psiUtil.findFunctionByName
 import org.jetbrains.kotlin.resolve.calls.util.getType
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
 import org.jetbrains.kotlin.types.isError
-import java.math.RoundingMode
-import java.text.DecimalFormat
 
 /**
  * **EventBusUtils**
@@ -100,23 +97,23 @@ fun PsiMethodCallExpression.getObserveEventType(): PsiClass? =
     ((argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.typeArguments()
         ?.firstOrNull() as? PsiClassReferenceType)?.resolve()
 
+/**
+ * 通过发布事件和订阅事件调用，检索所有事件总线对象和对应的注册为事件的类型
+ */
 suspend fun getAllEventType(
     project: Project,
 ): Pair<HashMap<String, MutableList<PsiField>>, LinkedHashMap<String, MutableList<PsiElement>>> {
     val objMap = HashMap<String, MutableList<PsiField>>()
     val objEventMap = LinkedHashMap<String, MutableList<PsiElement>>()
 
-    val statusBar = WindowManager.getInstance().getStatusBar(project)
-    statusBar.startRefreshIndication("Searching all events.")
+    val processBar = JBStatusBarProgressBar(project, "search bus events").also { it.start() }
 
     coroutineScope {
         val ktFiles = getAllFiles(project, KotlinFileType.EXTENSION)
-        statusBar.info = getSearchingMsg(0.05)
+        processBar.addPercent(0.07)
         val javaFiles = getAllFiles(project, JavaFileType.DEFAULT_EXTENSION)
-        statusBar.info = getSearchingMsg(0.10)
-
-        val filesNum = ((ktFiles.size + javaFiles.size) / 0.90).toInt()
-        var nowFinishNum = filesNum / 10
+        processBar.addPercent(0.07)
+        processBar.allTaskNum = ktFiles.size + javaFiles.size
 
         ktFiles.forEach { psiFile ->
             launch {
@@ -131,8 +128,7 @@ suspend fun getAllEventType(
                         } else null
 
                         if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
-                            nowFinishNum++
-                            statusBar.info = getSearchingMsg(nowFinishNum, filesNum)
+                            processBar.addStep()
                         }) continue
                     }
                 }
@@ -149,28 +145,17 @@ suspend fun getAllEventType(
                         } else null
 
                         if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
-                            nowFinishNum++
-                            statusBar.info = getSearchingMsg(nowFinishNum, filesNum)
+                            processBar.addStep()
                         }) continue
                     }
                 }
             }
         }
     }
-
-    statusBar.stopRefreshIndication()
-    statusBar.info = "Finish search events."
+    processBar.finish()
 
     return objMap to objEventMap
 }
-
-private fun getSearchingMsg(nowNum: Int, allNum: Int): String = "Searching events: ${getPercentMsg(nowNum, allNum)}%"
-private fun getSearchingMsg(value: Double): String = "Searching events: ${getPercentMsg(value)}%"
-
-private val percentFormatter = DecimalFormat("##.##").apply { roundingMode = RoundingMode.FLOOR }
-private fun getPercentMsg(value: Double): String =
-    percentFormatter.format(100.0 * value)
-private fun getPercentMsg(nowNum: Int, allNum: Int): String = getPercentMsg(nowNum.toDouble() / allNum.toDouble())
 
 private suspend fun getAllFiles(project: Project, fileType: String) =
     smartReadAction(project) { FilenameIndex.getAllFilesByExt(project, fileType, GlobalSearchScope.projectScope(project)) }
@@ -182,7 +167,7 @@ private fun addEventTypeMap(
     event: PsiElement?,
     objMap: HashMap<String, MutableList<PsiField>>,
     objEventMap: LinkedHashMap<String, MutableList<PsiElement>>,
-    successfulCallback: () -> Unit,
+    successfulCallback: () -> Unit = {},
 ): Boolean {
     obj ?: return false
     event ?: return false
