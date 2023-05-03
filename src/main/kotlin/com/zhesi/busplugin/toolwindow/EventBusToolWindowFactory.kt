@@ -16,6 +16,8 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
+import com.zhesi.busplugin.common.BusTarget
+import com.zhesi.busplugin.common.EventTarget
 import com.zhesi.busplugin.common.Icons
 import com.zhesi.busplugin.common.getAllEventType
 import kotlinx.coroutines.CoroutineName
@@ -45,6 +47,9 @@ import javax.swing.tree.DefaultMutableTreeNode
  * 0.0.3
  * TODO: 调试的运行时事件流转记录查看支持
  *
+ * 0.0.4
+ * TODO: 优化性能，全局监听修改，维护目标 psi 缓存，只在一开始并行搜索一次
+ *
  * @author lq
  * @version 1.0
  */
@@ -63,6 +68,8 @@ class EventBusToolWindowFactory : ToolWindowFactory {
     class EventBusToolWindow(private val project: Project) {
         private val rootNode = createTreeNode(EventBusTreeItemData("总线事件", Icons.BUS))
         private val runScope = CoroutineScope(CoroutineName("EventBusToolWindowRunScope") + Dispatchers.Default)
+
+        private var busEventMap: Map<BusTarget, Set<EventTarget>>? = null
 
         /**
          * 创建一个新的工具栏组件
@@ -101,7 +108,7 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         }
 
         /**
-         * 设置展示的内容
+         * 设置展示的内容，可在非主线程运行
          */
         fun setTreeData(data: Any?) {
             rootNode.removeAllChildren()
@@ -111,17 +118,23 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         private fun _setTreeData(root: DefaultMutableTreeNode, data: Any?) {
             when (data) {
                 null -> return
-                is Iterable<*> -> {
-                    for (i in data) {
-                        _setTreeData(root, i)
-                    }
-                }
                 is Map<*, *> -> {
                     for ((key, value) in data) {
                         _setTreeData(root, key)
                         (root.lastChild as? DefaultMutableTreeNode)?.let {
                             _setTreeData(it, value)
                         }
+                    }
+                }
+                is Pair<*, *> -> {
+                    _setTreeData(root, data.first)
+                    (root.lastChild as? DefaultMutableTreeNode)?.let {
+                        _setTreeData(it, data.second)
+                    }
+                }
+                is Iterable<*> -> {
+                    for (i in data) {
+                        _setTreeData(root, i)
                     }
                 }
                 else -> root.add(createTreeNode(data))
@@ -133,17 +146,46 @@ class EventBusToolWindowFactory : ToolWindowFactory {
          */
         private fun updateEvents() {
             runScope.launch(Dispatchers.IO) {
-                val (objMap, objEventMap) = getAllEventType(project)
-                val resultMap = LinkedHashMap<EventBusTreeItemData, List<EventBusTreeItemData>>()
-                for ((objFqName, eventList) in objEventMap.entries) {
-                    objMap[objFqName]?.firstOrNull()?.let { obj ->
-                        resultMap[EventBusTreeItemData(obj, Icons.BUS_OBJ)] = eventList.map {
-                            EventBusTreeItemData(it, Icons.EVENT)
+                val data = getAllEventType(project)
+                busEventMap = data
+                setTreeData(getEventSortNameShowData(data.toList()))
+            }
+        }
+
+        /**
+         * 根据事件的当前序展示事件
+         */
+        private fun getEventStdShowData(busEventMap: Collection<Pair<BusTarget, Collection<EventTarget>>>): List<Pair<EventBusTreeItemData, List<EventBusTreeItemData>>> {
+            val result = mutableListOf<Pair<EventBusTreeItemData, List<EventBusTreeItemData>>>()
+            for ((bus, eventList) in busEventMap) {
+                // 默认使用目标的第一个psi描述
+                bus.psiDesSet.firstOrNull()?.let { busPsi ->
+                    result.add(
+                        EventBusTreeItemData(busPsi, Icons.BUS_OBJ) to eventList.mapNotNull { et ->
+                            et.psiDesSet.firstOrNull()?.let { EventBusTreeItemData(it, Icons.EVENT) }
+                        }
+                    )
+                }
+            }
+            return result
+        }
+
+        /**
+         * 根据事件的名字序展示事件
+         *
+         * 排序规则：根据包名 + 事件类型名从后向前
+         */
+        private fun getEventSortNameShowData(busEventMap: Collection<Pair<BusTarget, Collection<EventTarget>>>): List<Pair<EventBusTreeItemData, List<EventBusTreeItemData>>> {
+            return getEventStdShowData(busEventMap.toList()
+                .sortedBy { it.first.fqName }
+                .map { pair ->
+                    pair.first to pair.second.sortedBy { et ->
+                        et.fqName.split(".").let {
+                            it.slice(0 until it.size - 1).joinToString(".") + it.last().reversed()
                         }
                     }
                 }
-                setTreeData(resultMap)
-            }
+            )
         }
 
         /**

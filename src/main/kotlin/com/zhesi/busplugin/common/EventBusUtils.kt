@@ -97,15 +97,29 @@ fun PsiMethodCallExpression.getObserveEventType(): PsiClass? =
     ((argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.typeArguments()
         ?.firstOrNull() as? PsiClassReferenceType)?.resolve()
 
+
+/**
+ * Psi 对象，通过 "对象 fqName -> Set<T>" 表示一个对象，对象 fqName 作为该对象的唯一标识
+ *
+ * 单个 psi 对象存在多种 psi 描述方式，如 java 和 kotlin 不同的描述，且不好相互转化与判断相等
+ */
+data class PsiTarget<T: PsiElement>(val fqName: String) {
+    val psiDesSet = mutableSetOf<T>()
+}
+
+typealias BusTarget = PsiTarget<PsiField>
+typealias EventTarget = PsiTarget<PsiElement>
+
 /**
  * 通过发布事件和订阅事件调用，检索所有事件总线对象和对应的注册为事件的类型
+ *
+ * @return 总线对象fqName -> 总线对象Psi集合(存在多种psi的表达方式); 总线对象fqName -> 该总线上的事件定义集合
+ * 保证了一个文件内注册为事件的事件顺序
  */
 suspend fun getAllEventType(
     project: Project,
-): Pair<HashMap<String, MutableList<PsiField>>, LinkedHashMap<String, MutableList<PsiElement>>> {
-    val objMap = HashMap<String, MutableList<PsiField>>()
-    val objEventMap = LinkedHashMap<String, MutableList<PsiElement>>()
-
+): Map<BusTarget, Set<EventTarget>> {
+    val busEventMap = LinkedHashMap<BusTarget, LinkedHashSet<EventTarget>>()
     val processBar = JBStatusBarProgressBar(project, "search bus events").also { it.start() }
 
     coroutineScope {
@@ -127,7 +141,7 @@ suspend fun getAllEventType(
                             call.getExtObserveEventType()
                         } else null
 
-                        if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
+                        if (!addEventTypeMap(call.getCallObj(), event, busEventMap) {
                             processBar.addStep()
                         }) continue
                     }
@@ -144,7 +158,7 @@ suspend fun getAllEventType(
                             call.getObserveEventType()
                         } else null
 
-                        if (!addEventTypeMap(call.getCallObj(), event, objMap, objEventMap) {
+                        if (!addEventTypeMap(call.getCallObj(), event, busEventMap) {
                             processBar.addStep()
                         }) continue
                     }
@@ -154,7 +168,7 @@ suspend fun getAllEventType(
     }
     processBar.finish()
 
-    return objMap to objEventMap
+    return busEventMap
 }
 
 private suspend fun getAllFiles(project: Project, fileType: String) =
@@ -163,22 +177,20 @@ private suspend fun getAllFiles(project: Project, fileType: String) =
 
 @Synchronized
 private fun addEventTypeMap(
-    obj: PsiField?,
-    event: PsiElement?,
-    objMap: HashMap<String, MutableList<PsiField>>,
-    objEventMap: LinkedHashMap<String, MutableList<PsiElement>>,
+    busPsi: PsiField?,
+    eventPsi: PsiElement?,
+    busEventMap: MutableMap<BusTarget, LinkedHashSet<EventTarget>>,
     successfulCallback: () -> Unit = {},
 ): Boolean {
-    obj ?: return false
-    event ?: return false
-    val objFqName = obj.getKotlinFqName()?.asString() ?: return false
+    val objFqName = busPsi?.getKotlinFqName()?.asString() ?: return false
+    val eventFqName = eventPsi?.getKotlinFqName()?.asString() ?: return false
 
-    objMap.getOrPut(objFqName) { mutableListOf() }.let {
-        if (!it.contains(obj)) it.add(obj)
+    val busTarget = (busEventMap.keys.find { it.fqName == objFqName } ?: BusTarget(objFqName)).apply {
+        psiDesSet.add(busPsi)
     }
-    objEventMap.getOrPut(objFqName) { mutableListOf() }.let {
-        if (!it.contains(event)) it.add(event)
-    }
+    val eventSet = busEventMap.getOrPut(busTarget) { linkedSetOf() }
+    val eventTarget = eventSet.find { it.fqName == eventFqName } ?: EventTarget(eventFqName).apply { eventSet.add(this) }
+    eventTarget.psiDesSet.add(eventPsi)
 
     successfulCallback()
     return true
