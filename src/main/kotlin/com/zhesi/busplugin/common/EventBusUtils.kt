@@ -202,15 +202,3 @@ private fun addEventTypeMap(
     successfulCallback()
     return true
 }
-
-
-// PsiClass, KtClassOrObject
-fun groupEventBySuper(eventSet: Set<PsiElement>) {
-    for (e in eventSet) {
-        if (e is PsiClass) {
-            println(e)
-        } else if (e is KtClassOrObject) {
-            println(e)
-        } else continue
-    }
-}

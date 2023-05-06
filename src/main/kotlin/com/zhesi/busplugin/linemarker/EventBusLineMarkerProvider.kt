@@ -163,10 +163,11 @@ class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
             .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
             .forEach { psiFile ->
                 val tarObjPostCalls = PsiTreeUtil.findChildrenOfAnyType(psiFile, KtCallElement::class.java)
+                    .asSequence()
                     .filter { call -> tarFunFilter(project, call) }
                     .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
                     .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
-                    .map { call -> call.navigationElement }
+                    .filterNotNull()
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
@@ -184,10 +185,11 @@ class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
             .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
             .forEach { psiFile ->
                 val tarObjPostCalls = PsiTreeUtil.findChildrenOfAnyType(psiFile, PsiMethodCallExpression::class.java)
+                    .asSequence()
                     .filter { call -> call.tarFunFilter() }
                     .filter { call -> isFieldEqual(call.getCallObj(), callObj)}
                     .filter { call -> isEventTypeEqual(call.eventTypeGetter(), observeEventType) }
-                    .map { call -> call.navigationElement }
+                    .filterNotNull()
                     .toList()
                 targets.addAll(tarObjPostCalls)
             }
@@ -205,11 +207,11 @@ class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
     ): RelatedItemLineMarkerInfo<PsiElement> {
         val builder: NavigationGutterIconBuilder<PsiElement> =
             NavigationGutterIconBuilder.create(lineIcon)
-                .setTargets(targets)
+                .setTargets(targets.map { it.navigationElement })
                 .setTooltipText(tipTest)
                 .setAlignment(GutterIconRenderer.Alignment.RIGHT)
                 .setCellRenderer { TargetCellRenderer(targetIcon) }
-        return builder.createLineMarkerInfo(navigationPoint)
+        return builder.createLineMarkerInfo(navigationPoint.getCallIdentifier())
     }
 
     /**

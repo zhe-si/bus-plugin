@@ -3,10 +3,7 @@ package com.zhesi.busplugin.toolwindow
 import com.intellij.codeInsight.navigation.NavigationUtil
 import com.intellij.icons.AllIcons
 import com.intellij.ide.util.treeView.NodeDescriptor
-import com.intellij.openapi.actionSystem.ActionManager
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -24,13 +21,13 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import java.awt.BorderLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Icon
 import javax.swing.JSeparator
 import javax.swing.tree.DefaultMutableTreeNode
+import kotlin.properties.Delegates
 
 
 /**
@@ -66,10 +63,19 @@ class EventBusToolWindowFactory : ToolWindowFactory {
     override fun shouldBeAvailable(project: Project) = true
 
     class EventBusToolWindow(private val project: Project) {
-        private val rootNode = createTreeNode(EventBusTreeItemData("总线事件", Icons.BUS))
         private val runScope = CoroutineScope(CoroutineName("EventBusToolWindowRunScope") + Dispatchers.Default)
 
+        private val rootNode = createTreeNode(EventBusTreeItemData("总线事件", Icons.BUS))
+        private val eventTree = Tree(rootNode)
+
         private var busEventMap: Map<BusTarget, Set<EventTarget>>? = null
+
+        /**
+         * 是否使用事件名正序对事件进行排序
+         */
+        private var isUseEventNamePositiveSeq by Delegates.observable(false) { _, _, _ ->
+            updateEventsShow()
+        }
 
         /**
          * 创建一个新的工具栏组件
@@ -77,7 +83,6 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         fun getContent(): JBPanel<JBPanel<*>> {
             return JBPanel<JBPanel<*>>(BorderLayout(7, 7)).apply {
                 // 展示内容面板
-                val eventTree = Tree(rootNode)
                 eventTree.addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent?) {
                         if (e?.clickCount == 2) {
@@ -90,9 +95,15 @@ class EventBusToolWindowFactory : ToolWindowFactory {
 
                 // 工具栏
                 val actionGroup = DefaultActionGroup(ID_ACTION_GROUP, false).apply {
-                    add(object : AnAction(AllIcons.Actions.Refresh) {
+                    add(object : AnAction("更新事件列表", "更新事件列表", AllIcons.Actions.Refresh) {
                         override fun actionPerformed(e: AnActionEvent) {
                             updateEvents()
+                        }
+                    })
+                    add(object : ToggleAction("事件名正序", "是否按照事件名正序排列", AllIcons.General.Filter) {
+                        override fun isSelected(e: AnActionEvent): Boolean = isUseEventNamePositiveSeq
+                        override fun setSelected(e: AnActionEvent, state: Boolean) {
+                            isUseEventNamePositiveSeq = state
                         }
                     })
                 }
@@ -113,6 +124,7 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         fun setTreeData(data: Any?) {
             rootNode.removeAllChildren()
             _setTreeData(rootNode, data)
+            eventTree.updateUI()
         }
 
         private fun _setTreeData(root: DefaultMutableTreeNode, data: Any?) {
@@ -146,9 +158,17 @@ class EventBusToolWindowFactory : ToolWindowFactory {
          */
         private fun updateEvents() {
             runScope.launch(Dispatchers.IO) {
-                val data = getAllEventType(project)
-                busEventMap = data
-                setTreeData(getEventSortNameShowData(data.toList()))
+                busEventMap = getAllEventType(project)
+                updateEventsShow()
+            }
+        }
+
+        /**
+         * 根据当前状态更新事件展示内容
+         */
+        private fun updateEventsShow() {
+            busEventMap?.let {
+                setTreeData(getEventSortNameShowData(it.toList()))
             }
         }
 
@@ -161,8 +181,8 @@ class EventBusToolWindowFactory : ToolWindowFactory {
                 // 默认使用目标的第一个psi描述
                 bus.psiDesSet.firstOrNull()?.let { busPsi ->
                     result.add(
-                        EventBusTreeItemData(busPsi, Icons.BUS_OBJ) to eventList.mapNotNull { et ->
-                            et.psiDesSet.firstOrNull()?.let { EventBusTreeItemData(it, Icons.EVENT) }
+                        EventBusTreeItemData(busPsi, Icons.BUS_OBJ, bus.fqName) to eventList.mapNotNull { et ->
+                            et.psiDesSet.firstOrNull()?.let { EventBusTreeItemData(it, Icons.EVENT, et.fqName) }
                         }
                     )
                 }
@@ -173,7 +193,7 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         /**
          * 根据事件的名字序展示事件
          *
-         * 排序规则：根据包名 + 事件类型名从后向前
+         * 排序规则：根据包名 + 事件类型名顺序 / 逆序
          */
         private fun getEventSortNameShowData(busEventMap: Collection<Pair<BusTarget, Collection<EventTarget>>>): List<Pair<EventBusTreeItemData, List<EventBusTreeItemData>>> {
             return getEventStdShowData(busEventMap.toList()
@@ -181,7 +201,9 @@ class EventBusToolWindowFactory : ToolWindowFactory {
                 .map { pair ->
                     pair.first to pair.second.sortedBy { et ->
                         et.fqName.split(".").let {
-                            it.slice(0 until it.size - 1).joinToString(".") + it.last().reversed()
+                            it.slice(0 until it.size - 1).joinToString(".") + "." +
+                                    if (isUseEventNamePositiveSeq) it.last()
+                                    else it.last().reversed()
                         }
                     }
                 }
@@ -194,7 +216,7 @@ class EventBusToolWindowFactory : ToolWindowFactory {
         private fun nativeSelectedElement(eventTree: Tree) {
             val node = eventTree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return
             val psiElement = ((node.userObject as? EventBusNodeDescriptor)?.element as? EventBusTreeItemData)?.data as? PsiElement ?: return
-            NavigationUtil.activateFileWithPsiElement(psiElement, true)
+            NavigationUtil.activateFileWithPsiElement(psiElement.navigationElement, true)
         }
 
         private fun createTreeNode(data: Any) = DefaultMutableTreeNode(EventBusNodeDescriptor(data))
@@ -211,10 +233,8 @@ class EventBusToolWindowFactory : ToolWindowFactory {
             override fun toString(): String = data.toString()
         }
 
-        data class EventBusTreeItemData(val data: Any, val icon: Icon? = null) {
-            override fun toString(): String =
-                if (data is PsiElement) data.getKotlinFqName()?.asString() ?: data.text
-                else data.toString()
+        data class EventBusTreeItemData(val data: Any, val icon: Icon? = null, val name: String? = null) {
+            override fun toString(): String = name ?: data.toString()
         }
 
         companion object {

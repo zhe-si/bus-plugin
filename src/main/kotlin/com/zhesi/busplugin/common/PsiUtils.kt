@@ -1,9 +1,8 @@
 package com.zhesi.busplugin.common
 
 import com.intellij.openapi.project.Project
-import com.intellij.psi.PsiField
-import com.intellij.psi.PsiMethodCallExpression
-import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.*
+import com.intellij.psi.impl.source.tree.CompositeElement
 import com.intellij.psi.search.GlobalSearchScope
 import org.jetbrains.kotlin.asJava.getRepresentativeLightMethod
 import org.jetbrains.kotlin.asJava.toLightClass
@@ -38,7 +37,7 @@ fun KtCallElement.getCallPsiMethod() = getCallFun()?.asPsiMethod()
 fun PsiMethodCallExpression.getCallObj() = (methodExpression.qualifierExpression as? PsiReferenceExpression)?.resolve() as? PsiField
 
 fun KtCallElement.getCallObj(): PsiField? {
-    val rRef = (calleeExpression as? KtNameReferenceExpression)?.getReceiverExpression() as? KtNameReferenceExpression ?: return null
+    val rRef = (calleeExpression as? KtSimpleNameExpression)?.getReceiverExpression() as? KtSimpleNameExpression ?: return null
     val rField: PsiField = when (val rPsi = rRef.getReferenceTargets(rRef.analyze()).singleOrNull()?.findPsi()) {
         is KtObjectDeclaration -> rPsi.toLightClass()?.findFieldByName("INSTANCE", false) ?: return null
         is KtProperty -> {
@@ -49,3 +48,27 @@ fun KtCallElement.getCallObj(): PsiField? {
     }
     return rField
 }
+
+
+fun KtClassOrObject.getSuperClassList() =
+    superTypeListEntries
+        .mapNotNull { it.typeAsUserType?.referenceExpression?.resolve() }
+        .filter { it is PsiClass || it is KtClassOrObject }
+
+fun PsiElement.getSuperClassList() =
+    when (this) {
+        is KtClassOrObject -> getSuperClassList()
+        is PsiClass -> supers.filterNotNull()
+        else -> null
+    }
+
+
+/**
+ * 获得调用对象的标识符，如果找不到则返回自身
+ */
+fun PsiElement.getCallIdentifier(): PsiElement =
+    when (this) {
+        is PsiMethodCallExpression -> (methodExpression as? CompositeElement)?.findPsiChildByType(JavaTokenType.IDENTIFIER) ?: this
+        is KtCallElement -> (calleeExpression as? KtSimpleNameExpression)?.getIdentifier() ?: this
+        else -> this
+    }
