@@ -35,6 +35,8 @@ fun getIBusClass(project: Project) = findKtClass(project, Configs.I_EVENT_BUS_FQ
 fun getIBusFun(project: Project, funName: String) = getIBusClass(project)?.findFunctionByName(funName) as? KtFunction
 
 
+////////////////// 判断是否为发送或订阅方法 //////////////////////
+
 fun isBusPostFun(project: Project, tarMethod: PsiMethod?): Boolean {
     if (tarMethod == null) return false
     val iEventBusPostFun = getIBusFun(project, Configs.EVENT_BUS_POST_FUN_NAME) ?: return false
@@ -52,6 +54,8 @@ fun PsiCall.isBusPostFun() = resolveMethod()?.let { isBusPostFun(project, it) } 
 fun PsiCall.isBusObserveFun() = resolveMethod()?.let { isBusObserveFun(project, it) } ?: false
 
 
+////////////////// 判断指向 psi 相等 //////////////////////
+
 fun isEventTypeEqual(type1: PsiElement?, type2: PsiElement?): Boolean {
     if (type1 == null || type2 == null) return false
     return type1.getKotlinFqName()?.let { it == type2.getKotlinFqName() } == true
@@ -62,6 +66,8 @@ fun isFieldEqual(f1: PsiField?, f2: PsiField?): Boolean {
     return f1 == f2 || f1.getKotlinFqName()?.let { it == f2.getKotlinFqName() } == true
 }
 
+
+////////////////// 获得 event 类型 //////////////////////
 
 fun KtCallElement.getPostEventType(): KtClassOrObject? {
     return valueArguments.firstOrNull()?.getArgumentExpression()
@@ -90,13 +96,16 @@ fun KtCallElement.getObserveEventType(): KtClassOrObject? {
     return null
 }
 
-fun KtCallElement.getExtObserveEventType(): KtClassOrObject? =
-    (typeArguments.firstOrNull()?.typeReference?.typeElement as? KtUserType)?.referenceExpression?.resolve() as? KtClassOrObject
+// 返回 KtClassOrObject 或 PsiClass
+fun KtCallElement.getExtObserveEventType(): PsiElement? =
+    (typeArguments.firstOrNull()?.typeReference?.typeElement as? KtUserType)?.referenceExpression?.resolve()
 
 fun PsiMethodCallExpression.getObserveEventType(): PsiClass? =
     ((argumentList.expressions.firstOrNull()?.type as? PsiClassType)?.typeArguments()
         ?.firstOrNull() as? PsiClassReferenceType)?.resolve()
 
+
+////////////////// 获得所有 event //////////////////////
 
 /**
  * Psi 对象，通过 "对象 fqName -> Set<T>" 表示一个对象，对象 fqName 作为该对象的唯一标识
@@ -141,9 +150,8 @@ suspend fun getAllEventType(
                             call.getExtObserveEventType()
                         } else null
 
-                        if (!addEventTypeMap(call.getCallObj(), event, busEventMap) {
-                            processBar.addStep()
-                        }) continue
+                        addEventTypeMap(call.getCallObj(), event, busEventMap)
+                        processBar.addStep()
                     }
                 }
             }
@@ -158,9 +166,8 @@ suspend fun getAllEventType(
                             call.getObserveEventType()
                         } else null
 
-                        if (!addEventTypeMap(call.getCallObj(), event, busEventMap) {
-                            processBar.addStep()
-                        }) continue
+                        addEventTypeMap(call.getCallObj(), event, busEventMap)
+                        processBar.addStep()
                     }
                 }
             }
@@ -194,4 +201,16 @@ private fun addEventTypeMap(
 
     successfulCallback()
     return true
+}
+
+
+// PsiClass, KtClassOrObject
+fun groupEventBySuper(eventSet: Set<PsiElement>) {
+    for (e in eventSet) {
+        if (e is PsiClass) {
+            println(e)
+        } else if (e is KtClassOrObject) {
+            println(e)
+        } else continue
+    }
 }

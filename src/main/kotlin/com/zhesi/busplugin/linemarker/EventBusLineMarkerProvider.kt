@@ -14,8 +14,8 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.zhesi.busplugin.common.*
 import com.zhesi.busplugin.config.Configs
 import org.jetbrains.kotlin.idea.KotlinFileType
+import org.jetbrains.kotlin.idea.base.utils.fqname.getKotlinFqName
 import org.jetbrains.kotlin.psi.KtCallElement
-import org.jetbrains.kotlin.psi.KtClassOrObject
 import javax.swing.Icon
 
 /**
@@ -96,7 +96,7 @@ class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
             val targets = getPostTargets(project, callObj, observeEventType)
 
             return createNavigationGutterIcon(element, targets, Icons.OBSERVE, Icons.POST,
-                "Navigate to ${observeEventType.name} poster")
+                "Navigate to ${observeEventType.getKotlinFqName()} poster")
         }
         return null
     }
@@ -157,7 +157,7 @@ class EventBusLineMarkerProvider : RelatedItemLineMarkerProvider() {
         observeEventType: PsiElement,
         targets: ArrayList<PsiElement>,
         tarFunFilter: (Project, KtCallElement) -> Boolean,
-        eventTypeGetter: KtCallElement.() -> KtClassOrObject?,
+        eventTypeGetter: KtCallElement.() -> PsiElement?,
     ) {
         FilenameIndex.getAllFilesByExt(project, KotlinFileType.EXTENSION, GlobalSearchScope.projectScope(project))
             .mapNotNull { vf -> PsiManager.getInstance(project).findFile(vf) }
